@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tyler-lutz/chirpy/internal/database"
@@ -12,20 +14,33 @@ import (
 type apiConfig struct {
 	fileserverHits int
 	DB             *database.DB
+	jwtSecret      string
 }
 
 func main() {
 	const port = "8080"
 	const filepathRoot = "."
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+
 	db, err := database.NewDB("database.json")
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	dbg := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
+	if dbg != nil && *dbg {
+		err := db.ResetDB()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	apiCfg := apiConfig{
 		fileserverHits: 0,
 		DB:             db,
+		jwtSecret:      jwtSecret,
 	}
 
 	router := chi.NewRouter()
@@ -36,10 +51,15 @@ func main() {
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", handlerReadiness)
 	apiRouter.Get("/reset", apiCfg.handlerReset)
+
+	apiRouter.Post("/login", apiCfg.handlerLogin)
+
+	apiRouter.Post("/users", apiCfg.handlerUsersCreate)
+	apiRouter.Put("/users", apiCfg.handlerUsersUpdate)
+
 	apiRouter.Post("/chirps", apiCfg.handlerChirpsCreate)
 	apiRouter.Get("/chirps", apiCfg.handlerChirpsRead)
 	apiRouter.Get("/chirps/{chirpID}", apiCfg.handlerChirpsReadOne)
-	apiRouter.Post("/users", apiCfg.handlerUsersCreate)
 	router.Mount("/api", apiRouter)
 
 	adminRouter := chi.NewRouter()
