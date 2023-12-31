@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
 	"github.com/tyler-lutz/chirpy/internal/database"
 )
 
@@ -15,13 +16,23 @@ type apiConfig struct {
 	fileserverHits int
 	DB             *database.DB
 	jwtSecret      string
+	polkaKey       string
 }
 
 func main() {
-	const port = "8080"
 	const filepathRoot = "."
+	const port = "8080"
+
+	godotenv.Load(".env")
 
 	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET environment variable is not set")
+	}
+	polkaKey := os.Getenv("POLKA_KEY")
+	if polkaKey == "" {
+		log.Fatal("POLKA_KEY environment variable is not set")
+	}
 
 	db, err := database.NewDB("database.json")
 	if err != nil {
@@ -41,6 +52,7 @@ func main() {
 		fileserverHits: 0,
 		DB:             db,
 		jwtSecret:      jwtSecret,
+		polkaKey:       polkaKey,
 	}
 
 	router := chi.NewRouter()
@@ -52,20 +64,19 @@ func main() {
 	apiRouter.Get("/healthz", handlerReadiness)
 	apiRouter.Get("/reset", apiCfg.handlerReset)
 
+	apiRouter.Post("/polka/webhooks", apiCfg.handlerWebhook)
+
+	apiRouter.Post("/revoke", apiCfg.handlerRevoke)
+	apiRouter.Post("/refresh", apiCfg.handlerRefresh)
 	apiRouter.Post("/login", apiCfg.handlerLogin)
 
 	apiRouter.Post("/users", apiCfg.handlerUsersCreate)
 	apiRouter.Put("/users", apiCfg.handlerUsersUpdate)
 
-	apiRouter.Post("/refresh", apiCfg.handlerRefresh)
-	apiRouter.Post("/revoke", apiCfg.handlerRevoke)
-
+	apiRouter.Delete("/chirps/{chirpID}", apiCfg.handlerChirpsDelete)
 	apiRouter.Post("/chirps", apiCfg.handlerChirpsCreate)
 	apiRouter.Get("/chirps", apiCfg.handlerChirpsRead)
 	apiRouter.Get("/chirps/{chirpID}", apiCfg.handlerChirpsReadOne)
-	apiRouter.Delete("/chirps/{chirpID}", apiCfg.handlerChirpsDelete)
-
-	apiRouter.Post("/polka/webhooks", apiCfg.handlerWebhook)
 	router.Mount("/api", apiRouter)
 
 	adminRouter := chi.NewRouter()
@@ -74,13 +85,13 @@ func main() {
 
 	corsMux := middlewareCors(router)
 
-	server := &http.Server{
+	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: corsMux,
 	}
 
 	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
-	log.Fatal(server.ListenAndServe())
+	log.Fatal(srv.ListenAndServe())
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
